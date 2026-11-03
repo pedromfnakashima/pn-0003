@@ -1,0 +1,4 @@
+# Coleta "em tempo real" no Portal da Transparência e testes ponta a ponta
+-r requirements.txt
+playwright>=1.48
+pytest>=8

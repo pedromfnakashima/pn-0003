@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Painel: capturas de tela geradas pelos testes
+dashboard/tests/capturas/
