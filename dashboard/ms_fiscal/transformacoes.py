@@ -5,6 +5,27 @@ import pandas as pd
 
 from . import referencias as R
 
+
+def distintos(s: pd.Series) -> list[str]:
+    """Equivale a `list(s.astype(str).unique())`, na mesma ordem, sem converter cada linha em texto.
+
+    Numa coluna categórica com centenas de milhares de linhas, a conversão custa segundos de CPU no Streamlit Cloud."""
+    if isinstance(s.dtype, pd.CategoricalDtype):
+        cats = [str(c) for c in s.cat.categories] + ["nan"]  # o último recebe os ausentes (código -1)
+        return list(dict.fromkeys(cats[k] for k in pd.unique(s.cat.codes.to_numpy())))
+    return list(s.astype(str).unique())
+
+
+def _por_valor(s: pd.Series, f) -> pd.Series:
+    """Aplica `f` uma vez por valor distinto, e não linha a linha.
+
+    No Streamlit Cloud a CPU é pequena e o laço em Python segura o GIL: enquanto ele roda, o servidor deixa de
+    entregar os arquivos JavaScript da página (erro "Failed to fetch dynamically imported module")."""
+    feitos = {v: f(v) for v in s.unique()}
+    # .map com função (e não com o dicionário) mantém o tipo da coluna que o .map(f) original produzia
+    return s.map(lambda v: feitos[v] if v in feitos else f(v))
+
+
 # ------------------------------------------------------------------ rótulos de receita
 _rotulos_portal: dict[str, str] = {}
 
@@ -52,10 +73,10 @@ def receitas_msc(msc: pd.DataFrame) -> pd.DataFrame:
     # e dedução simultâneas; a "bruta exceto renúncia" mantém a comparabilidade com anos anteriores.
     df["renuncia"] = df["conta_contabil"] == "621320000"
     df["natureza_receita"] = df["natureza_receita"].fillna("00000000").astype(str)
-    df["tributo"] = df["natureza_receita"].map(R.tributo_chave)
-    df["intra"] = df["natureza_receita"].str[:1].isin(["7", "8"])
-    df["poder"] = df["poder_orgao"].map(R.rotulo_poder)
-    df["fonte"] = df["fonte_recursos"].map(R.rotulo_fonte)
+    df["tributo"] = _por_valor(df["natureza_receita"], R.tributo_chave)
+    df["intra"] = _por_valor(df["natureza_receita"], lambda c: c[:1] in ("7", "8"))
+    df["poder"] = _por_valor(df["poder_orgao"], R.rotulo_poder)
+    df["fonte"] = _por_valor(df["fonte_recursos"], R.rotulo_fonte)
     df["data"] = pd.to_datetime(dict(year=df["ano"], month=df["mes"], day=1))
     return df[["ano", "mes", "data", "tipo", "deducao", "renuncia", "natureza_receita", "tributo", "intra", "poder", "fonte", "valor"]]
 
@@ -86,20 +107,28 @@ def despesas_msc(msc: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     df = msc[msc["conta_contabil"].isin(ESTAGIO_CONTAS)].copy()
     for est in ("empenhado", "liquidado", "pago"):
-        mask = df["conta_contabil"].map(lambda c, e=est: e in ESTAGIO_CONTAS[c])
+        mask = df["conta_contabil"].isin([c for c, e in ESTAGIO_CONTAS.items() if est in e])
         df[est] = df["valor"].where(mask, 0.0)
-    nd = df["natureza_despesa"].fillna("").astype(str).str.ljust(8, "0")
-    df["categoria"] = nd.str[0].map(lambda c: f"{c} – {R.CATEGORIAS_DESPESA.get(c, '?')}")
-    df["grupo"] = nd.str[1].map(lambda c: f"{c} – {R.GRUPOS_DESPESA.get(c, '?')}")
-    df["modalidade"] = nd.str[2:4].map(lambda c: f"{c} – {R.MODALIDADES.get(c, '?')}")
-    df["grupo_modalidade"] = nd.str[2:4].map(lambda c: R.GRUPO_MODALIDADE.get(c, "Outras"))
-    df["elemento"] = nd.str[4:6].map(lambda c: f"{c} – {R.ELEMENTOS.get(c, '?')}")
-    df["natureza"] = nd.str[0] + "." + nd.str[1] + "." + nd.str[2:4] + "." + nd.str[4:6]
-    df["funcao"] = df["funcao"].fillna("").map(lambda c: f"{c} – {R.FUNCOES.get(c, '?')}")
-    df["subfuncao"] = df["subfuncao"].fillna("").map(lambda c: f"{c} – {R.SUBFUNCOES.get(c, '?')}")
-    df["poder"] = df["poder_orgao"].map(R.rotulo_poder)
-    df["fonte"] = df["fonte_recursos"].map(R.rotulo_fonte)
-    df["intra"] = nd.str[2:4] == "91"
+    # rótulos calculados uma vez por natureza distinta (são poucas centenas) e depois espalhados pelas linhas
+    nat = df["natureza_despesa"].fillna("").astype(str)
+    u = pd.Series(nat.unique())
+    nd = u.str.ljust(8, "0")
+    rot = pd.DataFrame({
+        "categoria": nd.str[0].map(lambda c: f"{c} – {R.CATEGORIAS_DESPESA.get(c, '?')}"),
+        "grupo": nd.str[1].map(lambda c: f"{c} – {R.GRUPOS_DESPESA.get(c, '?')}"),
+        "modalidade": nd.str[2:4].map(lambda c: f"{c} – {R.MODALIDADES.get(c, '?')}"),
+        "grupo_modalidade": nd.str[2:4].map(lambda c: R.GRUPO_MODALIDADE.get(c, "Outras")),
+        "elemento": nd.str[4:6].map(lambda c: f"{c} – {R.ELEMENTOS.get(c, '?')}"),
+        "natureza": nd.str[0] + "." + nd.str[1] + "." + nd.str[2:4] + "." + nd.str[4:6],
+        "intra": nd.str[2:4] == "91",
+    })
+    pos = pd.Index(u).get_indexer(nat)
+    for c in rot.columns:
+        df[c] = rot[c].to_numpy()[pos]
+    df["funcao"] = _por_valor(df["funcao"].fillna(""), lambda c: f"{c} – {R.FUNCOES.get(c, '?')}")
+    df["subfuncao"] = _por_valor(df["subfuncao"].fillna(""), lambda c: f"{c} – {R.SUBFUNCOES.get(c, '?')}")
+    df["poder"] = _por_valor(df["poder_orgao"], R.rotulo_poder)
+    df["fonte"] = _por_valor(df["fonte_recursos"], R.rotulo_fonte)
     df["data"] = pd.to_datetime(dict(year=df["ano"], month=df["mes"], day=1))
     cols = ["ano", "mes", "data", "poder", "funcao", "subfuncao", "categoria", "grupo", "modalidade",
             "grupo_modalidade", "elemento", "natureza", "fonte", "intra"]

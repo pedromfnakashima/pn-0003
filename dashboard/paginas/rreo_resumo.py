@@ -29,6 +29,12 @@ def _rotulo(a: int, b: int) -> str:
     return f"{b}º bim/{a}"
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
+def _estatisticas(assin: str, indicador: str, uf: str) -> pd.DataFrame:
+    """IR.estatisticas em cache: percorre todos os bimestres e roda a cada interação com a página."""
+    return IR.estatisticas(ui.rreo_uf()["indicadores"], indicador, uf)
+
+
 def render() -> None:
     dados = ui.rreo_uf()
     ind = dados.get("indicadores")
@@ -55,7 +61,7 @@ def render() -> None:
     # ---------------------------------------------------------------- quadro geral e destaques
     resumo = []
     for k in PRINCIPAIS:
-        e = IR.estatisticas(ind, k, UF)
+        e = _estatisticas(dados["assin"], k, UF)
         lin = e[(e["exercicio"] == a) & (e["periodo"] == b)]
         if lin.empty or pd.isna(lin["valor_uf"].iat[0]):
             continue
@@ -119,7 +125,7 @@ def render() -> None:
                       fontes=["siconfi_rreo_uf"], nota=f"RREO de {UF}, {b}º bimestre de {a}")
             if not vk.empty:
                 st.markdown(f"**Resultado:** {IR.FORMULAS[k][0]} = **{_fmt(vk.iat[0], unid)}**")
-    e = IR.estatisticas(ind, k, UF).sort_values("data")
+    e = _estatisticas(dados["assin"], k, UF).sort_values("data")
     if e.empty:
         st.info("Poucas UFs com esse indicador.")
         return

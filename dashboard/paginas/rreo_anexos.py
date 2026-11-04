@@ -8,6 +8,7 @@ import streamlit as st
 
 from ms_fiscal import graficos as G
 from ms_fiscal import rreo_estados as RE
+from ms_fiscal import transformacoes as T
 from ms_fiscal import ui
 
 ANEXOS = {
@@ -41,7 +42,7 @@ def _serie(assin: str, anexo: str, linhas: tuple[str, ...], coluna: str, modo: s
 @st.cache_data(show_spinner=False, max_entries=256)
 def _colunas(assin: str, anexo: str, linha: str) -> list[str]:
     b = ui.rreo_uf()["base"]
-    cols = list(dict.fromkeys(b.loc[(b["anexo"] == anexo) & (b["linha"] == linha), "coluna"].astype(str)))
+    cols = T.distintos(b.loc[(b["anexo"] == anexo) & (b["linha"] == linha), "coluna"])
     mr = [c for c in cols if c.startswith("<MR")]
     return ([RE.MENSAL] if mr else []) + [c for c in cols if not c.startswith("<MR")]
 
@@ -106,7 +107,7 @@ def render() -> None:
     assin = dados["assin"]
     entes = ui.entes_uf()
     regiao = dict(zip(entes["uf"], entes["regiao"].map(REGIOES))) if not entes.empty else {}
-    todas_ufs = sorted(base["uf"].astype(str).unique())
+    todas_ufs = sorted(T.distintos(base["uf"]))
     ex = base[["exercicio", "periodo"]].drop_duplicates().sort_values(["exercicio", "periodo"])
     a0, b0 = ex.iloc[0]
     a1, b1 = ex.iloc[-1]
@@ -282,7 +283,7 @@ def render() -> None:
     with t_intra:
         c = st.columns([1, 3])
         uf = _escolher(c[0], "Estado", todas_ufs, "rx_uf", "MS", format_func=lambda u: f"{u} – {regiao.get(u, '')}")
-        presentes = set(base.loc[(base["anexo"] == anexo) & (base["uf"] == uf), "linha"].astype(str))
+        presentes = set(T.distintos(base.loc[(base["anexo"] == anexo) & (base["uf"] == uf), "linha"]))
         opc = [ln for ln in rot if ln in presentes]
         chave = f"rx_linhas_{anexo}"
         if chave in st.session_state:

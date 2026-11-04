@@ -8,6 +8,7 @@ import streamlit as st
 
 from ms_fiscal import graficos as G
 from ms_fiscal import rgf_estados as RG
+from ms_fiscal import transformacoes as T
 from ms_fiscal import ui
 from paginas.rreo_anexos import (MAX_SERIES, REGIOES, SIGLA_REGIAO, UFS_PADRAO, UNIDADES, _cores_estaveis, _curto,
                                  _eixo, _escolher, _linhas, _rotulos)
@@ -35,7 +36,7 @@ def _serie(assin: str, anexo: str, linhas: tuple[str, ...], coluna: str, modo: s
 def _colunas(assin: str, anexo: str, linha: str, poderes: tuple[str, ...]) -> list[str]:
     b = ui.rgf_uf()["base"]
     m = (b["anexo"] == anexo) & (b["linha"] == linha) & b["co_poder"].isin(poderes)
-    return RG.colunas_da_linha(list(dict.fromkeys(b.loc[m, "coluna"].astype(str))))
+    return RG.colunas_da_linha(T.distintos(b.loc[m, "coluna"]))
 
 
 def _modos(coluna: str) -> tuple[list[str] | None, str]:
@@ -61,7 +62,7 @@ def render() -> None:
     assin = dados["assin"] + ui.assinatura_rreo_uf()  # o % da RCL usa a RCL do RREO
     entes = ui.entes_uf()
     regiao = dict(zip(entes["uf"], entes["regiao"].map(REGIOES))) if not entes.empty else {}
-    todas_ufs = sorted(base["uf"].astype(str).unique())
+    todas_ufs = sorted(T.distintos(base["uf"]))
     ex = base[["exercicio", "periodo"]].drop_duplicates().sort_values(["exercicio", "periodo"])
     a0, q0 = ex.iloc[0]
     a1, q1 = ex.iloc[-1]
@@ -104,11 +105,11 @@ def render() -> None:
     c = st.columns([1.3, 1.2, 2.4, 1.8])
     p_sel = c[0].selectbox("Poder", OPCOES_PODER, key="gx_poder")
     poderes = tuple(RG.PODERES) if p_sel == CONSOLIDADO else (p_sel[-2],)
-    presentes = set(base.loc[base["co_poder"].isin(poderes), "anexo"].astype(str))
+    presentes = set(T.distintos(base.loc[base["co_poder"].isin(poderes), "anexo"]))
     anexos = [a for a in ANEXOS if a in presentes] + sorted(presentes - set(ANEXOS))
     anexo = _escolher(c[1], "Anexo", anexos, "gx_anexo", "RGF-Anexo 01",
                       format_func=lambda a: f"{a.replace('RGF-', '')} – {ANEXOS.get(a, '')}")
-    lin_ok = set(base.loc[(base["anexo"] == anexo) & base["co_poder"].isin(poderes), "linha"].astype(str))
+    lin_ok = set(T.distintos(base.loc[(base["anexo"] == anexo) & base["co_poder"].isin(poderes), "linha"]))
     ca = cat[(cat["anexo"] == anexo) & cat["linha"].isin(lin_ok)].reset_index(drop=True)
     rot = _rotulos(ca)
     # padrão no Anexo 1: despesa líquida com pessoal (tem as colunas mensais <MR-k>)
@@ -246,7 +247,7 @@ def render() -> None:
         c = st.columns([1, 3])
         uf = _escolher(c[0], "Estado", todas_ufs, "gx_uf", "MS", format_func=lambda u: f"{u} – {regiao.get(u, '')}")
         m = (base["anexo"] == anexo) & (base["uf"] == uf) & base["co_poder"].isin(poderes)
-        presentes_uf = set(base.loc[m, "linha"].astype(str))
+        presentes_uf = set(T.distintos(base.loc[m, "linha"]))
         opc = [ln for ln in rot if ln in presentes_uf]
         chave = f"gx_linhas_{anexo}"
         if chave in st.session_state:

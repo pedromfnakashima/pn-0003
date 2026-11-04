@@ -43,10 +43,21 @@ Git: o painel funciona logo após o `git clone`, sem coletar nada. O painel reca
 1. Faça commit e push do repositório (inclusive `dados/dashboard/`).
 2. Em share.streamlit.io › *Create app*, escolha o repositório, o ramo `main` e **Main file path** `dashboard/app.py`.
    As dependências vêm de `dashboard/requirements.txt`; o tema, de `.streamlit/config.toml`.
+   As versões ficam fixas no `requirements.txt` para o Cloud rodar o mesmo que foi testado; use as mesmas no ambiente
+   local (`pip install -r requirements.txt`).
 3. Os botões de **Atualizar dados** funcionam na nuvem (IPCA, Siconfi, RREO das UFs, dados abertos), mas o disco do
    Cloud é temporário: o que for baixado vale até o app reiniciar. Para tornar a atualização permanente, rode a coleta
    localmente (ou no cron) e faça commit dos Parquet. O botão do Portal da Transparência fica desabilitado na nuvem,
    porque exige o Chromium do Playwright.
+
+### Desempenho na nuvem
+
+O Community Cloud dá ao app uma fração pequena de um núcleo de CPU. Enquanto o script de uma página roda, o mesmo
+processo Python também entrega os arquivos JavaScript do navegador; se o script passa muito tempo em código Python
+linha a linha, esses arquivos atrasam e o navegador mostra `TypeError: Failed to fetch dynamically imported module`.
+Por isso as cargas e transformações trabalham com valores distintos e categorias, em vez de `.map`/`astype(str)`
+sobre centenas de milhares de linhas, e as séries pesadas ficam em `st.cache_data`. Ao escrever código novo para o
+painel, siga o mesmo padrão (`transformacoes.distintos`, `ui.filtro_multiplo`, `ui.aplicar_filtro`).
 
 ## Páginas
 

@@ -16,9 +16,13 @@ import re
 import time
 from datetime import date
 
+import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import requests
 
+from .transformacoes import distintos
 from .config import BCB_IPCA, CKAN_API, IBGE_AGREGADOS, IBGE_SIDRA, USER_AGENT, caminho
 
 log = logging.getLogger(__name__)
@@ -201,16 +205,11 @@ def carregar_despesas_credor(anos: list[int] | None = None) -> pd.DataFrame:
         arqs = [a for a in arqs if int(a.stem.split("_")[1]) in anos]
     if not arqs:
         return pd.DataFrame()
-    partes = [pd.read_parquet(a) for a in arqs]
-    # unifica as categorias antes do concat: sem isso o pandas volta a 'object' e o pico de memória quase dobra
-    for c in partes[0].columns:
-        if all(isinstance(p[c].dtype, pd.CategoricalDtype) for p in partes if c in p):
-            cats = pd.api.types.union_categoricals([p[c] for p in partes if c in p]).categories
-            for p in partes:
-                if c in p:
-                    p[c] = p[c].astype(pd.CategoricalDtype(cats))
-    df = pd.concat(partes, ignore_index=True)
-    del partes
+    # O pyarrow junta os meses e unifica os dicionários das colunas categóricas em C. Fazer o mesmo no pandas
+    # (union_categoricals + astype) levava ~10 s de CPU segurando o GIL, o que trava o servidor no Streamlit Cloud.
+    tab = pa.concat_tables([pq.read_table(a) for a in arqs], promote_options="default").unify_dictionaries()
+    df = tab.to_pandas()
+    del tab
     df = normalizar_rotulos(df, ["orgao", "funcao", "subfuncao", "grupo", "modalidade", "elemento", "licitacao",
                                  "tipo_credor", "categoria", "programa", "acao"])
     return corrigir_rotulos_credor(df)
@@ -256,19 +255,35 @@ _VAZIO = {"funcao": "(não informada)", "subfuncao": "(não informada)", "progra
           "acao": "(não informada)"}
 
 
+def _remapear(s: pd.Series, mapa: dict) -> pd.Series:
+    """Troca os valores de `s` por `mapa[valor]` e devolve uma coluna categórica (categorias em ordem alfabética).
+
+    Trabalha nos códigos da categoria, sem converter cada linha em texto: equivale a
+    `s.astype(str).map(mapa).astype("category")`, mas em milissegundos."""
+    if not isinstance(s.dtype, pd.CategoricalDtype):
+        s = s.astype(str).astype("category")
+    cats = pd.Index([str(c) for c in s.cat.categories] + ["nan"])  # o último recebe os ausentes, como no astype(str)
+    novos = cats.map(lambda v: mapa.get(v, v))
+    codigos = s.cat.codes.to_numpy()
+    usados = np.unique(codigos)  # -1 (ausente) vai para o último índice
+    finais = pd.Index(sorted(set(novos[usados])))
+    pos = finais.get_indexer(novos)
+    return pd.Series(pd.Categorical.from_codes(pos[codigos], categories=finais), index=s.index, name=s.name)
+
+
 def corrigir_rotulos_credor(df: pd.DataFrame) -> pd.DataFrame:
     """Completa nomes cortados, corrige grafias e unifica renomeações; marca com '…' os textos ainda cortados e
     rotula os campos vazios."""
     for c in set(_ROTULOS_CREDOR) | set(_LARGURA_FONTE) | set(_VAZIO):
         if c not in df:
             continue
-        valores = pd.Series(df[c].astype(str).unique())
+        valores = pd.Series(distintos(df[c]))
         novo = valores.map(lambda v: _ROTULOS_CREDOR.get(c, {}).get(v, v))
         corte = novo.eq(valores) & novo.str.len().ge(_LARGURA_FONTE.get(c, 10**6))
         novo = novo.where(~corte, novo + "…")
         if c in _VAZIO:
             novo = novo.where(novo.str.strip().ne(""), _VAZIO[c])
-        df[c] = df[c].astype(str).map(dict(zip(valores, novo))).astype("category")
+        df[c] = _remapear(df[c], dict(zip(valores, novo)))
     return df
 
 
@@ -362,8 +377,8 @@ def normalizar_rotulos(df: pd.DataFrame, colunas: list[str]) -> pd.DataFrame:
     for c in colunas:
         if c not in df:
             continue
-        valores = pd.Series(df[c].astype(str).unique())
+        valores = pd.Series(distintos(df[c]))
         chave = valores.map(lambda v: re.sub(r"[^a-z0-9]", "", _sem_acento(v)))
         canon = valores.groupby(chave).transform("first")
-        df[c] = df[c].astype(str).map(dict(zip(valores, canon))).astype("category")
+        df[c] = _remapear(df[c], dict(zip(valores, canon)))
     return df

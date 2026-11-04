@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -337,13 +338,28 @@ def periodo(df: pd.DataFrame, somados: bool = True) -> str:
     return txt + (" (exercícios somados)" if somados and len(m) > 1 else "")
 
 
+def _distintos_texto(s: pd.Series) -> list[str]:
+    """Valores distintos e não nulos de `s`, como texto. Numa coluna categórica, lê só as categorias usadas: converter
+    as linhas em texto (centenas de milhares nos credores) custava segundos de CPU a cada interação."""
+    if isinstance(s.dtype, pd.CategoricalDtype):
+        cod = s.cat.codes.to_numpy()
+        return [str(c) for c in s.cat.categories[np.unique(cod[cod >= 0])]]
+    return [str(v) for v in pd.unique(s.dropna())]
+
+
 def filtro_multiplo(container, rotulo: str, opcoes, chave: str, padrao=None):
-    opcoes = sorted([o for o in pd.unique(pd.Series(opcoes).dropna().astype(str)) if o != ""])
+    opcoes = sorted({o for o in _distintos_texto(pd.Series(opcoes)) if o != ""})
     return container.multiselect(rotulo, opcoes, default=padrao or [], key=chave, placeholder="Todos")
 
 
 def aplicar_filtro(df: pd.DataFrame, col: str, valores: list) -> pd.DataFrame:
-    return df[df[col].astype(str).isin(valores)] if valores else df
+    if not valores:
+        return df
+    s = df[col]
+    if isinstance(s.dtype, pd.CategoricalDtype):  # compara as categorias, sem converter cada linha em texto
+        quero = set(map(str, valores))
+        return df[s.isin([c for c in s.cat.categories if str(c) in quero])]
+    return df[s.astype(str).isin(valores)]
 
 
 # ------------------------------------------------------------------ status e coleta

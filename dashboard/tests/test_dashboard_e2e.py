@@ -122,6 +122,7 @@ def test_interacoes(servidor):
 
 
 def _clicar_opcao(page, chave: str, opcao: str):
+    page.mouse.move(0, 0)  # fecha a tooltip do hover anterior, que no Streamlit ≥ 1.66 cobre o selectbox
     page.locator(f".st-key-{chave}").click()
     page.keyboard.type(opcao[:12])  # a lista é virtualizada: filtra digitando
     page.get_by_role("option", name=opcao).first.click()

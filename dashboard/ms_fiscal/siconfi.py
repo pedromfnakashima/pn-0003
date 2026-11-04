@@ -13,6 +13,8 @@ import time
 from typing import Iterable
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import requests
 
 from .config import ID_ENTE, SICONFI_API, USER_AGENT, caminho
@@ -120,7 +122,8 @@ def carregar_msc() -> pd.DataFrame:
     arqs = sorted(caminho("").glob("msc6_*.parquet"))
     if not arqs:
         return pd.DataFrame()
-    return pd.concat([pd.read_parquet(a) for a in arqs], ignore_index=True)
+    # concatenar no pyarrow e converter uma vez sai mais barato que concatenar as colunas de texto no pandas
+    return pa.concat_tables([pq.read_table(a) for a in arqs], promote_options="default").to_pandas()
 
 
 # --------------------------------------------------------------------------- RREO / RGF

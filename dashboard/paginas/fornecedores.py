@@ -109,7 +109,8 @@ def render():
     tipos = ui.filtro_multiplo(f2[3], "Tipo de credor", df["tipo_credor"], "fn_tipo")
     f3 = st.columns([2, 2, 1])
     modal = ui.filtro_multiplo(f3[0], "Modalidade de aplicação", df["modalidade"], "fn_mod")
-    licit = ui.filtro_multiplo(f3[1], "Tipo de licitação", df["licitacao"].astype(str).replace("", "(não informado)"), "fn_lic")
+    licit = ui.filtro_multiplo(f3[1], "Tipo de licitação",
+                               pd.Series(df["licitacao"].unique()).astype(str).replace("", "(não informado)"), "fn_lic")
     busca = f3[2].text_input("Credor ou CNPJ contém", key="fn_busca")
 
     est = ESTAGIOS[est_nome]
@@ -119,7 +120,7 @@ def render():
     for col, sel in (("orgao", orgaos), ("funcao", funcoes), ("elemento", elementos), ("tipo_credor", tipos), ("modalidade", modal)):
         d = ui.aplicar_filtro(d, col, sel)
     if licit:
-        d = d[d["licitacao"].astype(str).replace("", "(não informado)").isin(licit)]
+        d = ui.aplicar_filtro(d, "licitacao", [*licit, *([""] if "(não informado)" in licit else [])])
     if busca:
         d = d[d["credor"].astype(str).str.contains(busca, case=False, na=False) | d["cpf_cnpj"].astype(str).str.contains(busca, regex=False)]
     if d.empty:

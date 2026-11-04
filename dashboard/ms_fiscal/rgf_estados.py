@@ -199,11 +199,8 @@ def serie(base: pd.DataFrame, rcl_mes: pd.DataFrame, anexo: str, linhas: list[st
         esperado = (g.groupby(["uf", "exercicio", "periodo"], observed=True)["instituicao"].nunique()
                     .groupby(level="uf", observed=True).max())
         if coluna == MENSAL:
-            g = g[g["coluna"].astype(str).str.match(r"^<MR(?:-\d+)?>$")]
-            s = []
-            for inst, h in g.groupby(["uf", "co_poder", "instituicao"], observed=True):
-                s.append(RE.serie_mensal(h, MESES).assign(instituicao=inst[2]))
-            s = pd.concat(s, ignore_index=True) if s else pd.DataFrame(columns=["uf", "data", "valor", "instituicao"])
+            # uma série por instituição (o relatório mais recente de cada uma prevalece), numa só passada
+            s = RE.serie_mensal(g, MESES, manter=("co_poder", "instituicao"))
             s = s.groupby(["uf", "data"], observed=True, as_index=False).agg(valor=("valor", "sum"),
                                                                              n_inst=("instituicao", "nunique"))
             if modo == MODOS_MENSAL[1]:

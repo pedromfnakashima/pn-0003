@@ -278,29 +278,37 @@ _MR = re.compile(r"^<MR(?:-(\d+))?>$")
 
 
 def defasagem(coluna: pd.Series) -> pd.Series:
-    """<MR> → 0, <MR-1> → 1 … ; outras colunas → NaN."""
-    k = coluna.astype(str).str.extract(r"^<MR(?:-(\d+))?>$")[0]
-    eh = coluna.astype(str).str.match(r"^<MR(?:-\d+)?>$")
-    return k.fillna("0").astype(float).where(eh)
+    """<MR> → 0, <MR-1> → 1 … ; outras colunas → NaN.
+
+    A expressão regular roda uma vez por nome de coluna distinto (são poucos), não linha a linha."""
+    u = coluna.unique()
+    k = pd.Series(pd.Series(u).astype(str).str.extract(r"^<MR(?:-(\d+))?>$")[0].to_numpy(), index=u)
+    eh = pd.Series(pd.Series(u).astype(str).str.match(r"^<MR(?:-\d+)?>$").to_numpy(), index=u)
+    k = k.fillna("0").astype(float).where(eh)
+    return pd.Series(k.reindex(coluna.to_numpy()).to_numpy(), index=coluna.index, name=coluna.name)
 
 
-def serie_mensal(d: pd.DataFrame, meses: int = 2, por: tuple[str, ...] = ()) -> pd.DataFrame:
+def serie_mensal(d: pd.DataFrame, meses: int = 2, por: tuple[str, ...] = (),
+                 manter: tuple[str, ...] = ()) -> pd.DataFrame:
     """Série mensal a partir das colunas <MR-k> de um recorte (uma linha do anexo, várias UFs).
 
     Mês = mês de referência do relatório (meses × período: 2·b no RREO, 4·q no RGF) − k. Quando o mesmo mês aparece
     em vários relatórios, prevalece o mais recente (que incorpora retificações). `por` (ex.: Poder e instituição no
-    RGF) escolhe o relatório mais recente em cada grupo antes de somar os grupos."""
+    RGF) escolhe o relatório mais recente em cada grupo antes de somar os grupos. `manter` faz o mesmo, mas não soma
+    os grupos: eles vão para a saída como colunas (equivale a rodar a função uma vez por grupo, em uma só passada)."""
+    manter = list(manter)
     d = d.assign(k=defasagem(d["coluna"])).dropna(subset=["k"])
     if d.empty:
-        return pd.DataFrame(columns=["uf", "data", "valor"])
-    ref = pd.to_datetime(dict(year=d["exercicio"].astype(int), month=d["periodo"].astype(int) * meses, day=1))
-    d = d.assign(data=[r - pd.DateOffset(months=int(k)) for r, k in zip(ref, d["k"])],
-                 ordem=d["exercicio"].astype(int) * 10 + d["periodo"].astype(int))
-    por = list(por)
-    d = d.groupby(["uf", *por, "data", "ordem"], observed=True, as_index=False)["valor"].sum()
-    d = d.sort_values("ordem").drop_duplicates(["uf", *por, "data"], keep="last")
-    d = d.groupby(["uf", "data"], observed=True, as_index=False)["valor"].sum()
-    return d.sort_values(["uf", "data"]).reset_index(drop=True)
+        return pd.DataFrame(columns=["uf", *manter, "data", "valor"])
+    ex, per = d["exercicio"].astype(int), d["periodo"].astype(int)
+    # meses contados desde o ano 0: mês de referência menos a defasagem k (vetorizado, sem DateOffset linha a linha)
+    n = ex * 12 + per * meses - 1 - d["k"].astype(int)
+    d = d.assign(data=pd.to_datetime(dict(year=n // 12, month=n % 12 + 1, day=1)), ordem=ex * 10 + per)
+    chaves = ["uf", *manter, *por]
+    d = d.groupby([*chaves, "data", "ordem"], observed=True, as_index=False)["valor"].sum()
+    d = d.sort_values("ordem").drop_duplicates([*chaves, "data"], keep="last")
+    d = d.groupby(["uf", *manter, "data"], observed=True, as_index=False)["valor"].sum()
+    return d.sort_values(["uf", *manter, "data"]).reset_index(drop=True)
 
 
 def serie_referencia(d: pd.DataFrame, meses: int = 2) -> pd.DataFrame:
