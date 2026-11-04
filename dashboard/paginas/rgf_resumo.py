@@ -156,13 +156,19 @@ def render() -> None:
     fig.update_yaxes(autorange="reversed")
     ui.grafico(fig, "rg_res_hist", "siconfi_rgf_uf", valores=False, nota="RGF de MS, todos os quadrimestres desde 2023")
 
-    c = st.columns(2)
-    for i, (ind, grupo) in enumerate([("Despesa total com pessoal", RG.TODOS), ("Despesa total com pessoal",
-                                                                                  "Executivo")]):
+    st.markdown("##### 📈 Evolução de cada indicador e dos seus limites")
+    series = []
+    for ind, grupo in [*ORDEM, ("Despesa total com pessoal", "Defensoria Pública")]:
         s = ms[(ms["indicador"] == ind) & (ms["grupo"] == grupo)]
         if not s.empty:
-            ui.grafico(_fig_limite(s, _titulo_sit(s, _nome(ind, grupo)), 360), f"rg_res_lim_{i}", "siconfi_rgf_uf",
-                       onde=c[i], valores=False, nota="RGF, Anexo 1: DTP e limites em R$ ÷ RCL ajustada")
+            series.append((ind, grupo, s))
+    for i, (ind, grupo, s) in enumerate(series):
+        if i % 2 == 0:
+            c = st.columns(2)
+        nota = ("RGF, Anexo 1: DTP e limites em R$ ÷ RCL ajustada" if ind == "Despesa total com pessoal"
+                else "RGF, Anexos 2 a 4: saldo ou valor no exercício ÷ RCL ajustada; limites das resoluções do Senado")
+        ui.grafico(_fig_limite(s, _titulo_sit(s, _nome(ind, grupo)), 360), f"rg_res_lim_{i}", "siconfi_rgf_uf",
+                   onde=c[i % 2], valores=False, nota=nota)
     with st.expander("ℹ️ Limites considerados e base legal", expanded=False):
         st.markdown(
             "- **Os limites de pessoal variam por esfera e por Poder** (LRF, arts. 19 e 20): União 50% (Executivo "
