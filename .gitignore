@@ -221,3 +221,7 @@ __marimo__/
 
 # Painel: capturas de tela geradas pelos testes
 dashboard/tests/capturas/
+
+.vscode/
+nao-versionar/
+anotacoes/
